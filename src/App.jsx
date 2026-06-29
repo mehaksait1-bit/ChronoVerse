@@ -22,13 +22,13 @@ const Future2200 = lazy(() => import("./scenes/Future2200"));
 const BeyondTime = lazy(() => import("./scenes/BeyondTime"));
 
 const PREHISTORIC_INDEX = 1;
+const LOADER_MAX_MS = 10000;
 
 function SceneCanvas({
   forceScene,
   isPreloading,
   onThreeProgress,
   onThreeIdle,
-  staticReady,
 }) {
   const { scene } = useScrollContext() ?? {};
   const activeScene = forceScene ?? scene;
@@ -38,15 +38,17 @@ function SceneCanvas({
       camera={{ position: [2, 2, 3], fov: 48 }}
       dpr={[1, 1.75]}
       style={{ width: "100%", height: "100%" }}
+      onCreated={({ gl }) => {
+        gl.domElement.addEventListener("webglcontextlost", (e) => e.preventDefault());
+      }}
     >
       <CameraRig loadingZoom={isPreloading ? 1 : 0} />
       <VolumetricFog scene={activeScene} />
       <AmbientParticles scene={activeScene} />
       <OrbitControls enableZoom={false} enablePan={false} />
 
-      {isPreloading && staticReady && (
+      {isPreloading && (
         <PreloadSceneAssets
-          staticReady={staticReady}
           onProgress={onThreeProgress}
           onIdle={onThreeIdle}
         />
@@ -84,7 +86,6 @@ function Experience({
   forceScene,
   isPreloading,
   revealed,
-  staticReady,
   onThreeProgress,
   onThreeIdle,
 }) {
@@ -102,7 +103,6 @@ function Experience({
         <SceneCanvas
           forceScene={forceScene}
           isPreloading={isPreloading}
-          staticReady={staticReady}
           onThreeProgress={onThreeProgress}
           onThreeIdle={onThreeIdle}
         />
@@ -120,16 +120,25 @@ function Experience({
 
 export default function App() {
   const [progress, setProgress] = useState(0);
-  const [staticReady, setStaticReady] = useState(false);
+  const [assetsReady, setAssetsReady] = useState(false);
   const [threeIdle, setThreeIdle] = useState(false);
   const [overlayPhase, setOverlayPhase] = useState("loading");
   const journeyTimerRef = useRef(null);
+  const finishedRef = useRef(false);
 
   const handleThreeProgress = useCallback((value) => {
-    setProgress(value);
+    setProgress((prev) => Math.max(prev, value));
   }, []);
 
   const handleThreeIdle = useCallback(() => {
+    setThreeIdle(true);
+    setProgress(100);
+  }, []);
+
+  const forceFinishLoading = useCallback(() => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    setAssetsReady(true);
     setThreeIdle(true);
     setProgress(100);
   }, []);
@@ -141,17 +150,26 @@ export default function App() {
       if (!cancelled) {
         setProgress((prev) => Math.max(prev, value));
       }
-    }).then(() => {
-      if (!cancelled) setStaticReady(true);
-    });
+    })
+      .then(() => {
+        if (!cancelled) setAssetsReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) setAssetsReady(true);
+      });
+
+    const maxTimer = window.setTimeout(() => {
+      if (!cancelled) forceFinishLoading();
+    }, LOADER_MAX_MS);
 
     return () => {
       cancelled = true;
+      clearTimeout(maxTimer);
     };
-  }, []);
+  }, [forceFinishLoading]);
 
   useEffect(() => {
-    if (!staticReady || !threeIdle || overlayPhase !== "loading") return;
+    if (!assetsReady || !threeIdle || overlayPhase !== "loading") return;
 
     setProgress(100);
     setOverlayPhase("journey");
@@ -165,21 +183,21 @@ export default function App() {
         clearTimeout(journeyTimerRef.current);
       }
     };
-  }, [staticReady, threeIdle, overlayPhase]);
+  }, [assetsReady, threeIdle, overlayPhase]);
 
   const isLoading = overlayPhase === "loading";
   const revealed = overlayPhase === "exiting" || overlayPhase === "gone";
   const scrollEnabled = overlayPhase === "gone";
+  const showExperience = assetsReady || isLoading;
 
   return (
     <>
-      {staticReady && (
+      {showExperience && (
         <ScrollProvider enabled={scrollEnabled} initialSceneIndex={PREHISTORIC_INDEX}>
           <Experience
             forceScene={isLoading ? "prehistoric" : undefined}
             isPreloading={isLoading}
             revealed={revealed}
-            staticReady={staticReady}
             onThreeProgress={handleThreeProgress}
             onThreeIdle={handleThreeIdle}
           />

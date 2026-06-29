@@ -19,53 +19,41 @@ const ALL_SCENES = [
   BeyondTime,
 ];
 
-function ProgressReporter({ onProgress, onIdle, staticReady }) {
+function ProgressReporter({ onProgress, onIdle }) {
   const { progress, active, loaded, total } = useProgress();
   const idleSent = useRef(false);
 
-  useEffect(() => {
-    if (!staticReady) return;
+  const finish = () => {
+    if (idleSent.current) return;
+    idleSent.current = true;
+    onProgress(100);
+    onIdle();
+  };
 
+  useEffect(() => {
     const threePct = total > 0 ? progress : 100;
     const combined = 40 + Math.round(threePct * 0.6);
-    onProgress(Math.min(100, combined));
-  }, [progress, total, staticReady, onProgress]);
+    onProgress(Math.min(99, combined));
+  }, [progress, total, onProgress]);
 
   useEffect(() => {
-    if (!staticReady || idleSent.current) return;
-
     if (total > 0 && !active && loaded >= total) {
-      idleSent.current = true;
-      onProgress(100);
-      onIdle();
+      finish();
     }
-  }, [active, loaded, total, staticReady, onProgress, onIdle]);
+  }, [active, loaded, total]);
 
   useEffect(() => {
-    if (!staticReady || idleSent.current) return;
-
-    const fallback = window.setTimeout(() => {
-      if (!idleSent.current) {
-        idleSent.current = true;
-        onProgress(100);
-        onIdle();
-      }
-    }, 2500);
-
+    const fallback = window.setTimeout(finish, 1500);
     return () => clearTimeout(fallback);
-  }, [staticReady, onProgress, onIdle]);
+  }, []);
 
   return null;
 }
 
-export default function PreloadSceneAssets({ onProgress, onIdle, staticReady }) {
+export default function PreloadSceneAssets({ onProgress, onIdle }) {
   return (
     <>
-      <ProgressReporter
-        onProgress={onProgress}
-        onIdle={onIdle}
-        staticReady={staticReady}
-      />
+      <ProgressReporter onProgress={onProgress} onIdle={onIdle} />
       <Suspense fallback={null}>
         <group position={[0, -5000, 0]} visible={false}>
           {ALL_SCENES.map((Scene, i) => (

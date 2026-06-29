@@ -22,27 +22,24 @@ export const SCENE_LOADERS = [
 
 const STATIC_IMAGES = [heroImage, "/favicon.svg"];
 
-const FONT_FAMILIES = ['"Orbitron"', "Georgia", "system-ui"];
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(resolve, ms)),
+  ]);
+}
 
 function loadImage(src) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => resolve(src);
-    img.onerror = () => reject(new Error(`Failed to load image: ${src}`));
+    img.onerror = () => resolve(src);
     img.src = src;
   });
 }
 
 async function preloadFonts() {
-  await document.fonts.ready;
-
-  await Promise.all(
-    FONT_FAMILIES.flatMap((family) =>
-      ["400", "500", "700"].map((weight) =>
-        document.fonts.load(`${weight} 16px ${family}`).catch(() => undefined)
-      )
-    )
-  );
+  await withTimeout(document.fonts.ready, 3000);
 }
 
 async function preloadImages(onItem) {
@@ -64,7 +61,11 @@ export async function preloadSceneModules(onProgress) {
 
   await Promise.all(
     SCENE_LOADERS.map(async (load) => {
-      await load();
+      try {
+        await load();
+      } catch {
+        // Scene chunk failed — still advance so loading never hangs
+      }
       done += 1;
       onProgress(Math.round((done / total) * 100));
     })
@@ -72,8 +73,8 @@ export async function preloadSceneModules(onProgress) {
 }
 
 /**
- * Preload fonts, images, and scene JS modules.
- * Three.js textures/models are tracked separately via PreloadSceneAssets + useProgress.
+ * Preload scene modules first (required), then fonts/images in parallel.
+ * Never throws — production must not hang on optional assets.
  */
 export async function preloadStaticAssets(onProgress) {
   let fontsDone = false;
@@ -81,27 +82,29 @@ export async function preloadStaticAssets(onProgress) {
   let modulesPct = 0;
 
   const report = () => {
-    const fontsWeight = fontsDone ? 15 : 0;
+    const fontsWeight = fontsDone ? 10 : 0;
     const imagesWeight = imagesPct * 0.1;
-    const modulesWeight = modulesPct * 0.25;
+    const modulesWeight = modulesPct * 0.3;
     onProgress(Math.min(40, Math.round(fontsWeight + imagesWeight + modulesWeight)));
   };
 
-  const fontsPromise = preloadFonts().then(() => {
-    fontsDone = true;
-    report();
-  });
-
-  const imagesPromise = preloadImages((pct) => {
-    imagesPct = pct;
-    report();
-  });
-
-  const modulesPromise = preloadSceneModules((pct) => {
+  await preloadSceneModules((pct) => {
     modulesPct = pct;
     report();
   });
 
-  await Promise.all([fontsPromise, imagesPromise, modulesPromise]);
+  onProgress(40);
+
+  await Promise.all([
+    preloadFonts().then(() => {
+      fontsDone = true;
+      report();
+    }),
+    preloadImages((pct) => {
+      imagesPct = pct;
+      report();
+    }),
+  ]).catch(() => undefined);
+
   onProgress(40);
 }
