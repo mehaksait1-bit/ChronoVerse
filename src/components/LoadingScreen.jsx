@@ -116,6 +116,14 @@ export default function LoadingScreen({ progress, phase, onExitComplete }) {
     if (phase === "exiting") setVisible(false);
   }, [phase]);
 
+  // Safety net if framer-motion exit callback never fires
+  useEffect(() => {
+    if (phase !== "exiting") return;
+
+    const fallback = window.setTimeout(onExitComplete, 2000);
+    return () => clearTimeout(fallback);
+  }, [phase, onExitComplete]);
+
   return (
     <AnimatePresence onExitComplete={onExitComplete}>
       {visible && (

@@ -39,20 +39,11 @@ function loadImage(src) {
 }
 
 async function preloadFonts() {
-  await withTimeout(document.fonts.ready, 3000);
+  await withTimeout(document.fonts.ready, 2000);
 }
 
-async function preloadImages(onItem) {
-  let done = 0;
-  const total = STATIC_IMAGES.length;
-
-  await Promise.all(
-    STATIC_IMAGES.map(async (src) => {
-      await loadImage(src);
-      done += 1;
-      onItem(done / total);
-    })
-  );
+async function preloadImages() {
+  await Promise.all(STATIC_IMAGES.map(loadImage));
 }
 
 export async function preloadSceneModules(onProgress) {
@@ -62,9 +53,9 @@ export async function preloadSceneModules(onProgress) {
   await Promise.all(
     SCENE_LOADERS.map(async (load) => {
       try {
-        await load();
+        await withTimeout(load(), 5000);
       } catch {
-        // Scene chunk failed — still advance so loading never hangs
+        // Continue even if a chunk fails
       }
       done += 1;
       onProgress(Math.round((done / total) * 100));
@@ -72,39 +63,14 @@ export async function preloadSceneModules(onProgress) {
   );
 }
 
-/**
- * Preload scene modules first (required), then fonts/images in parallel.
- * Never throws — production must not hang on optional assets.
- */
 export async function preloadStaticAssets(onProgress) {
-  let fontsDone = false;
-  let imagesPct = 0;
-  let modulesPct = 0;
-
-  const report = () => {
-    const fontsWeight = fontsDone ? 10 : 0;
-    const imagesWeight = imagesPct * 0.1;
-    const modulesWeight = modulesPct * 0.3;
-    onProgress(Math.min(40, Math.round(fontsWeight + imagesWeight + modulesWeight)));
-  };
-
   await preloadSceneModules((pct) => {
-    modulesPct = pct;
-    report();
+    onProgress(Math.min(90, Math.round(pct * 0.9)));
   });
 
-  onProgress(40);
+  onProgress(95);
 
-  await Promise.all([
-    preloadFonts().then(() => {
-      fontsDone = true;
-      report();
-    }),
-    preloadImages((pct) => {
-      imagesPct = pct;
-      report();
-    }),
-  ]).catch(() => undefined);
+  await Promise.all([preloadFonts(), preloadImages()]).catch(() => undefined);
 
-  onProgress(40);
+  onProgress(100);
 }

@@ -1,11 +1,10 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { EffectComposer, Bloom, Vignette } from "@react-three/postprocessing";
 
 import { ScrollProvider, useScrollContext } from "./context/ScrollContext";
 import LoadingScreen from "./components/LoadingScreen";
-import PreloadSceneAssets from "./components/PreloadSceneAssets";
 import CameraRig from "./components/CameraRig";
 import VolumetricFog from "./components/VolumetricFog";
 import AmbientParticles from "./components/AmbientParticles";
@@ -22,14 +21,9 @@ const Future2200 = lazy(() => import("./scenes/Future2200"));
 const BeyondTime = lazy(() => import("./scenes/BeyondTime"));
 
 const PREHISTORIC_INDEX = 1;
-const LOADER_MAX_MS = 10000;
+const LOADER_MAX_MS = 8000;
 
-function SceneCanvas({
-  forceScene,
-  isPreloading,
-  onThreeProgress,
-  onThreeIdle,
-}) {
+function SceneCanvas({ forceScene, isPreloading }) {
   const { scene } = useScrollContext() ?? {};
   const activeScene = forceScene ?? scene;
 
@@ -46,13 +40,6 @@ function SceneCanvas({
       <VolumetricFog scene={activeScene} />
       <AmbientParticles scene={activeScene} />
       <OrbitControls enableZoom={false} enablePan={false} />
-
-      {isPreloading && (
-        <PreloadSceneAssets
-          onProgress={onThreeProgress}
-          onIdle={onThreeIdle}
-        />
-      )}
 
       <Suspense fallback={null}>
         {activeScene === "intro" && <IntroScene />}
@@ -82,13 +69,7 @@ function SceneCanvas({
   );
 }
 
-function Experience({
-  forceScene,
-  isPreloading,
-  revealed,
-  onThreeProgress,
-  onThreeIdle,
-}) {
+function Experience({ forceScene, isPreloading, revealed }) {
   return (
     <>
       <div id="chronoverse-scroll" className="scroll-track" />
@@ -100,12 +81,7 @@ function Experience({
           transition: "opacity 1.2s cubic-bezier(0.22, 1, 0.36, 1)",
         }}
       >
-        <SceneCanvas
-          forceScene={forceScene}
-          isPreloading={isPreloading}
-          onThreeProgress={onThreeProgress}
-          onThreeIdle={onThreeIdle}
-        />
+        <SceneCanvas forceScene={forceScene} isPreloading={isPreloading} />
       </div>
 
       {revealed && (
@@ -120,89 +96,54 @@ function Experience({
 
 export default function App() {
   const [progress, setProgress] = useState(0);
-  const [assetsReady, setAssetsReady] = useState(false);
-  const [threeIdle, setThreeIdle] = useState(false);
   const [overlayPhase, setOverlayPhase] = useState("loading");
-  const journeyTimerRef = useRef(null);
-  const finishedRef = useRef(false);
-
-  const handleThreeProgress = useCallback((value) => {
-    setProgress((prev) => Math.max(prev, value));
-  }, []);
-
-  const handleThreeIdle = useCallback(() => {
-    setThreeIdle(true);
-    setProgress(100);
-  }, []);
-
-  const forceFinishLoading = useCallback(() => {
-    if (finishedRef.current) return;
-    finishedRef.current = true;
-    setAssetsReady(true);
-    setThreeIdle(true);
-    setProgress(100);
-  }, []);
+  const startedRef = useRef(false);
 
   useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+
     let cancelled = false;
+    let exitStarted = false;
+
+    const beginExit = () => {
+      if (cancelled || exitStarted) return;
+      exitStarted = true;
+      setProgress(100);
+      setOverlayPhase("journey");
+
+      window.setTimeout(() => {
+        if (!cancelled) setOverlayPhase("exiting");
+      }, 1000);
+    };
 
     preloadStaticAssets((value) => {
-      if (!cancelled) {
-        setProgress((prev) => Math.max(prev, value));
-      }
+      if (!cancelled) setProgress((prev) => Math.max(prev, value));
     })
-      .then(() => {
-        if (!cancelled) setAssetsReady(true);
-      })
-      .catch(() => {
-        if (!cancelled) setAssetsReady(true);
-      });
+      .then(beginExit)
+      .catch(beginExit);
 
-    const maxTimer = window.setTimeout(() => {
-      if (!cancelled) forceFinishLoading();
-    }, LOADER_MAX_MS);
+    const maxTimer = window.setTimeout(beginExit, LOADER_MAX_MS);
 
     return () => {
       cancelled = true;
       clearTimeout(maxTimer);
     };
-  }, [forceFinishLoading]);
+  }, []);
 
-  useEffect(() => {
-    if (!assetsReady || !threeIdle || overlayPhase !== "loading") return;
-
-    setProgress(100);
-    setOverlayPhase("journey");
-
-    journeyTimerRef.current = window.setTimeout(() => {
-      setOverlayPhase("exiting");
-    }, 1000);
-
-    return () => {
-      if (journeyTimerRef.current) {
-        clearTimeout(journeyTimerRef.current);
-      }
-    };
-  }, [assetsReady, threeIdle, overlayPhase]);
-
-  const isLoading = overlayPhase === "loading";
+  const isLoading = overlayPhase === "loading" || overlayPhase === "journey";
   const revealed = overlayPhase === "exiting" || overlayPhase === "gone";
   const scrollEnabled = overlayPhase === "gone";
-  const showExperience = assetsReady || isLoading;
 
   return (
     <>
-      {showExperience && (
-        <ScrollProvider enabled={scrollEnabled} initialSceneIndex={PREHISTORIC_INDEX}>
-          <Experience
-            forceScene={isLoading ? "prehistoric" : undefined}
-            isPreloading={isLoading}
-            revealed={revealed}
-            onThreeProgress={handleThreeProgress}
-            onThreeIdle={handleThreeIdle}
-          />
-        </ScrollProvider>
-      )}
+      <ScrollProvider enabled={scrollEnabled} initialSceneIndex={PREHISTORIC_INDEX}>
+        <Experience
+          forceScene={isLoading ? "prehistoric" : undefined}
+          isPreloading={isLoading}
+          revealed={revealed}
+        />
+      </ScrollProvider>
 
       {overlayPhase !== "gone" && (
         <LoadingScreen
